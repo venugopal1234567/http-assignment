@@ -1,9 +1,9 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
+	"http-assignment/handlers"
+	"http-assignment/internal/domain/httpclient"
 	"log"
 	"net/http"
 	"time"
@@ -16,57 +16,6 @@ const (
 	addr = "127.0.0.1:8000"
 )
 
-type ProxyRequestSercive struct {
-	httpClient *http.Client
-	cache      *cache.Cache
-}
-
-func (p *ProxyRequestSercive) HealthCheck(w http.ResponseWriter, r *http.Request) {
-	// an example API handler
-	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
-}
-
-func (p *ProxyRequestSercive) ProxyServe(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case "GET":
-		if data, isExist := p.cache.Get(r.Host); isExist {
-			json.NewEncoder(w).Encode(map[string]string{r.Host: data.(string)})
-			return
-		}
-		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte(fmt.Sprintf("Host not found: %s", r.Host)))
-		return
-
-	case "POST":
-		resp, err := p.httpClient.Get("http://" + r.Host)
-		if err != nil {
-			w.WriteHeader(500)
-			w.Write([]byte(fmt.Sprintf("failed to get host: %v", err)))
-			return
-		}
-		if resp.StatusCode != http.StatusOK {
-			w.WriteHeader(resp.StatusCode)
-			w.Write([]byte(fmt.Sprintf("failed to get host: %s", r.Host)))
-			return
-		}
-
-		b, err := io.ReadAll(resp.Body)
-		// b, err := ioutil.ReadAll(resp.Body)  Go.1.15 and earlier
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte(fmt.Sprintf("failed to read response from : %s", r.Host)))
-			return
-		}
-
-		fmt.Println(string(b))
-
-		p.cache.Set(r.Host, string(b), 5*time.Minute)
-		json.NewEncoder(w).Encode(map[string]bool{"ok": true})
-
-	}
-
-}
-
 func main() {
 
 	tr := &http.Transport{
@@ -77,8 +26,8 @@ func main() {
 	c := cache.New(5*time.Minute, 10*time.Minute)
 
 	client := &http.Client{Transport: tr}
-
-	p := &ProxyRequestSercive{httpClient: client, cache: c}
+	cs := httpclient.NewHttpClientService(client)
+	p := &handlers.ProxyRequestSercive{HttpClient: cs, Cache: c}
 	router := mux.NewRouter()
 
 	router.HandleFunc("/api/health", p.HealthCheck)
