@@ -4,19 +4,44 @@ import (
 	"fmt"
 	"http-assignment/handlers"
 	"http-assignment/internal/domain/httpclient"
+	"http-assignment/internal/domain/jwtauth"
+	"http-assignment/internal/middlewares"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
+	_ "net/http/pprof"
+
+	"github.com/go-redis/redis"
 	"github.com/gorilla/mux"
 	"github.com/patrickmn/go-cache"
 )
 
 const (
-	addr = "127.0.0.1:8000"
+	addr = "127.0.0.1:8001"
 )
 
+var rclient *redis.Client
+
+func init() {
+	//Initializing redis
+	dsn := os.Getenv("REDIS_DSN")
+	if len(dsn) == 0 {
+		dsn = "localhost:6379"
+	}
+	rclient = redis.NewClient(&redis.Options{
+		Addr: dsn, //redis port
+	})
+	_, err := rclient.Ping().Result()
+	if err != nil {
+		panic(err)
+	}
+}
+
 func main() {
+	os.Setenv("ACCESS_SECRET", "jdnfksdmfksd")
+	os.Setenv("REFRESH_SECRET", "mcmvmkmsdnfsdmfdsjf")
 
 	tr := &http.Transport{
 		MaxIdleConns:       10,
@@ -27,11 +52,18 @@ func main() {
 
 	client := &http.Client{Transport: tr}
 	cs := httpclient.NewHttpClientService(client)
-	p := &handlers.ProxyRequestSercive{HttpClient: cs, Cache: c}
+	ja := jwtauth.NewJwtAuthService(os.Getenv("ACCESS_SECRET"), os.Getenv("REFRESH_SECRET"), rclient)
+	p := &handlers.ProxyRequestSercive{HttpClient: cs, Cache: c, JwtAuthService: ja}
+
+	m := middlewares.NewMiddleWareService(ja)
 	router := mux.NewRouter()
 
 	router.HandleFunc("/api/health", p.HealthCheck)
-	router.HandleFunc("/api/assert", p.ProxyServe)
+	proxyServeHandler := http.HandlerFunc(p.ProxyServe)
+	router.Handle("/api/assert", m.RequiresLogin(proxyServeHandler))
+	router.HandleFunc("/api/login", p.Login)
+	router.HandleFunc("/api/logout", p.Logout)
+	router.HandleFunc("/api/refresh", p.RefreshToken)
 
 	srv := &http.Server{
 		Handler: router,

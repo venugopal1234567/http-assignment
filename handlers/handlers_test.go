@@ -37,7 +37,7 @@ func TestSaveToCache(t *testing.T) {
 	}
 	for _, test := range tests {
 		c := cache.New(5*time.Minute, 10*time.Minute)
-		ps := ProxyRequestSercive{test.mock, c}
+		ps := ProxyRequestSercive{test.mock, c, nil}
 		req, err := http.NewRequest("POST", "/api/assert", nil)
 		if err != nil {
 			t.Fatal(err)
